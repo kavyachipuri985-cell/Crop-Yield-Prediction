@@ -1,12 +1,14 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import pickle
 from pathlib import Path
 
 
-# -----------------------------
-# Page Configuration
-# -----------------------------
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
 st.set_page_config(
     page_title="Crop Yield Prediction",
     page_icon="🌾",
@@ -14,114 +16,204 @@ st.set_page_config(
 )
 
 
-# -----------------------------
-# Load Model and Scaler
-# -----------------------------
-BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "model"
+# =========================================================
+# PATHS
+# =========================================================
 
-with open(MODEL_DIR / "crop_yield_model.pkl", "rb") as f:
-    model = pickle.load(f)
+BASE_DIR = Path(__file__).parent
 
-with open(MODEL_DIR / "scaler.pkl", "rb") as f:
-    scaler = pickle.load(f)
+MODEL_PATH = BASE_DIR / "crop_yield_model.pkl"
+SCALER_PATH = BASE_DIR / "scaler.pkl"
 
 
-# -----------------------------
-# Title
-# -----------------------------
+# =========================================================
+# LOAD MODEL
+# =========================================================
+
+@st.cache_resource
+def load_model():
+
+    if not MODEL_PATH.exists():
+        st.error(
+            f"Model file not found:\n\n{MODEL_PATH}"
+        )
+        st.stop()
+
+    with open(MODEL_PATH, "rb") as file:
+        model = pickle.load(file)
+
+    return model
+
+
+# =========================================================
+# LOAD SCALER
+# =========================================================
+
+@st.cache_resource
+def load_scaler():
+
+    if not SCALER_PATH.exists():
+        st.error(
+            f"Scaler file not found:\n\n{SCALER_PATH}"
+        )
+        st.stop()
+
+    with open(SCALER_PATH, "rb") as file:
+        scaler = pickle.load(file)
+
+    return scaler
+
+
+model = load_model()
+scaler = load_scaler()
+
+
+# =========================================================
+# TITLE
+# =========================================================
+
 st.title("🌾 Crop Yield Prediction")
 
 st.write(
-    "Enter the agricultural and environmental details below "
-    "to predict millet yield."
+    "Enter the required agricultural information below "
+    "to predict crop yield using a machine learning model."
 )
 
 
-# -----------------------------
-# User Inputs
-# -----------------------------
-Moisture = st.number_input(
-    "Moisture",
-    min_value=0.0,
-    value=12.9
-)
+# =========================================================
+# GET FEATURE NAMES
+# =========================================================
 
-rainfall = st.number_input(
-    "Rainfall",
-    min_value=0.0,
-    value=0.07
-)
+feature_names = None
 
-Average_Humidity = st.number_input(
-    "Average Humidity",
-    min_value=0,
-    max_value=100,
-    value=50
-)
+# If scaler was trained using a pandas DataFrame,
+# sklearn usually stores the feature names here.
+if hasattr(scaler, "feature_names_in_"):
+    feature_names = list(scaler.feature_names_in_)
 
-Mean_Temp = st.number_input(
-    "Mean Temperature",
-    value=76
-)
-
-max_Temp = st.number_input(
-    "Maximum Temperature",
-    value=89
-)
-
-Min_temp = st.number_input(
-    "Minimum Temperature",
-    value=64
-)
-
-alkaline = st.selectbox(
-    "Alkaline Soil",
-    [0, 1]
-)
-
-sandy = st.selectbox(
-    "Sandy Soil",
-    [0, 1]
-)
-
-chalky = st.selectbox(
-    "Chalky Soil",
-    [0, 1]
-)
-
-clay = st.selectbox(
-    "Clay Soil",
-    [0, 1]
-)
+# Otherwise try the model
+elif hasattr(model, "feature_names_in_"):
+    feature_names = list(model.feature_names_in_)
 
 
-# -----------------------------
-# Prediction
-# -----------------------------
-if st.button("Predict Yield"):
+# =========================================================
+# INPUT SECTION
+# =========================================================
 
-    input_data = pd.DataFrame({
-        "Moisture": [Moisture],
-        "rainfall": [rainfall],
-        "Average Humidity": [Average_Humidity],
-        "Mean Temp": [Mean_Temp],
-        "max Temp": [max_Temp],
-        "Min temp": [Min_temp],
-        "alkaline": [alkaline],
-        "sandy": [sandy],
-        "chalky": [chalky],
-        "clay": [clay]
-    })
+st.subheader("🌱 Enter Input Values")
 
-    # Scale input
-    input_scaled = scaler.transform(input_data)
 
-    # Prediction
-    prediction = model.predict(input_scaled)
+if feature_names is not None:
 
-    predicted_yield = prediction[0]
+    input_data = {}
 
-    st.success(
-        f"🌾 Predicted Millet Yield: {predicted_yield:.2f}"
+    for feature in feature_names:
+
+        input_data[feature] = st.number_input(
+            f"{feature}",
+            value=0.0
+        )
+
+else:
+
+    # Fallback if feature names were not saved
+    if hasattr(model, "n_features_in_"):
+        number_of_features = model.n_features_in_
+
+    elif hasattr(scaler, "n_features_in_"):
+        number_of_features = scaler.n_features_in_
+
+    else:
+        st.error(
+            "Unable to determine the number of input features."
+        )
+        st.stop()
+
+    st.warning(
+        "Feature names were not saved with the model/scaler. "
+        "Please make sure the inputs are entered in the same "
+        "order used during model training."
+    )
+
+    input_data = {}
+
+    for i in range(number_of_features):
+
+        input_data[f"Feature {i + 1}"] = st.number_input(
+            f"Feature {i + 1}",
+            value=0.0
+        )
+
+
+# =========================================================
+# PREDICTION
+# =========================================================
+
+st.write("")
+
+
+if st.button("🌾 Predict Crop Yield"):
+
+    try:
+
+        # Create DataFrame
+        input_df = pd.DataFrame(
+            [input_data]
+        )
+
+        # If feature names are available,
+        # preserve the exact training order.
+        if feature_names is not None:
+            input_df = input_df[feature_names]
+
+        # Convert to numeric
+        input_df = input_df.astype(float)
+
+        # Scale input
+        scaled_input = scaler.transform(input_df)
+
+        # Prediction
+        prediction = model.predict(scaled_input)
+
+        prediction_value = prediction[0]
+
+        # Display result
+        st.success("Prediction completed successfully! 🌾")
+
+        st.metric(
+            label="Predicted Crop Yield",
+            value=f"{prediction_value:.2f}"
+        )
+
+    except Exception as e:
+
+        st.error("Prediction failed.")
+
+        st.exception(e)
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+
+with st.sidebar:
+
+    st.header("📌 About")
+
+    st.write(
+        "This application uses a trained machine learning "
+        "regression model to predict crop yield."
+    )
+
+    st.write("### 🛠️ Technologies")
+
+    st.write(
+        """
+        - Python
+        - Streamlit
+        - Pandas
+        - NumPy
+        - Scikit-learn
+        - Machine Learning
+        """
     )
